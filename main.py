@@ -2,8 +2,9 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Union
 from datetime import datetime, timedelta
-from schema import Token, TokenData, User, UserInDB
-import jwt
+from schema import Token, User
+from jose import JWTError, jwt
+# import jwt
 
 # Constants for JWT
 SECRET_KEY = "238432032984"
@@ -38,15 +39,45 @@ def authenticate_user(db, username: str, password: str):
     return user
 
 
-# temp db
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    user = fake_users_db.get(username)
+    if user is None:
+        raise credentials_exception
+    return user
+
+def get_current_active_user(current_user: User = Depends(get_current_user)):
+    if current_user["type"] not in ["user", "admin"]:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
+
+def get_current_active_admin(current_user: User = Depends(get_current_user)):
+    if current_user["type"] != "admin":
+        raise HTTPException(status_code=400, detail="Not enough permissions")
+    return current_user
+
+
+# temp db   (user of list is better but for simplicity sake)    
 fake_users_db = {
     "reg": {
-        
+        "type": "user",
         "username": "reg",
         "email": "reg@example.com",
         "hashed_password": get_password_hash("reg"),
     },
     "admin": {
+        "type": "admin",
         "username": "admin",
         "email": "admin@example.com",
         "hashed_password": get_password_hash("admin"),
@@ -72,10 +103,9 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 
 @app.get("/user")
-async def get_user(item_id: int, token: str = Depends(oauth2_scheme)):
-    return {"item_id": item_id, "message": f"Item {item_id} details"}
+async def get_user(user_id: int, token: str = Depends(oauth2_scheme), current_user: User = Depends(get_current_active_user)):
+    return {"item_id": user_id, "message": "user details"}
 
 @app.post("/user")
-async def create_user(user: User, token: str = Depends(oauth2_scheme)):
-    # dummy response
+async def create_user(user: User, token: str = Depends(oauth2_scheme), current_user: User = Depends(get_current_active_admin)):
     return user
